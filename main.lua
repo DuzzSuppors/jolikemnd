@@ -161,6 +161,8 @@ local S = {
     -- NPC ESP
     NPCESP=false, NPCHeli=true, NPCBox=false, NPCNames=true, NPCDistance=true,
     NPCHealth=false, NPCRange=500, NPCTextSize=13,
+    -- Sleeper ESP
+    SleepersESP=false, SleepersRange=500, SleepersNames=true, SleepersDistance=true,
     -- World
     LootESP=false, LootBarrels=true, LootCrates=true, LootMilitary=true, LootElite=true,
     LootDistance=true, LootRange=400, LootContents=false,
@@ -1674,11 +1676,11 @@ local function updateSpeedJump()
         humanoid.UseJumpPower = true
         return
     end
-    pcall(function() humanoid.WalkSpeed = S.Speed and S.SpeedValue or 16 end)
+    if S.Speed then
+        pcall(function() humanoid.WalkSpeed = S.SpeedValue end)
+    end
     if S.HighJump then
         pcall(function() humanoid.UseJumpPower = true; humanoid.JumpPower = S.JumpHeight end)
-    else
-        pcall(function() humanoid.JumpPower = 50 end)
     end
 end
 local function startFly()
@@ -2252,6 +2254,83 @@ local function startKillLog()
     end)
 end
 
+local SleeperESP = {Entries={}, Labels={}, LabelIndex=0, NextScan=0, Seen={}}
+
+local function sleeperScan()
+    local now = os.clock()
+    if now < SleeperESP.NextScan then return end
+    SleeperESP.NextScan = now + 1
+    SleeperESP.Entries = {}
+    SleeperESP.Seen = {}
+    local myChar = Shared.Character()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj ~= myChar then
+            local lower = string.lower(obj.Name)
+            if string.find(lower, "sleep", 1, true) or string.find(lower, "sleeper", 1, true)
+                or string.find(lower, "ragdoll", 1, true) or string.find(lower, "body", 1, true) then
+                if not SleeperESP.Seen[obj] then
+                    SleeperESP.Seen[obj] = true
+                    local part = Shared.FindPart(obj, {"Head","Torso","UpperTorso","HumanoidRootPart"})
+                    if part then
+                        local humanoid = obj:FindFirstChildOfClass("Humanoid")
+                        local name = humanoid and humanoid.DisplayName or obj.Name
+                        table.insert(SleeperESP.Entries, {Model=obj, Part=part, Name=name})
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function sleeperLabel()
+    SleeperESP.LabelIndex += 1
+    local label = SleeperESP.Labels[SleeperESP.LabelIndex]
+    if not label then
+        label = newDrawing("Text")
+        if label then
+            label.Center = true; label.Outline = true; label.Font = 2
+        end
+        SleeperESP.Labels[SleeperESP.LabelIndex] = label
+    end
+    return label
+end
+
+local function renderSleeperESP()
+    for i = 1, SleeperESP.LabelIndex do
+        local label = SleeperESP.Labels[i]
+        if label then label.Visible = false end
+    end
+    SleeperESP.LabelIndex = 0
+    if not S.SleepersESP then return end
+    local rendered = 0
+    for _, entry in ipairs(SleeperESP.Entries) do
+        if rendered >= 200 then break end
+        local part = entry.Part
+        if part and part.Parent then
+            local dist = (part.Position - Camera.CFrame.Position).Magnitude
+            if dist <= S.SleepersRange then
+                local x, y, _, visible = Shared.Project(part.Position)
+                if visible then
+                    local label = sleeperLabel()
+                    if label then
+                        label.Visible = true
+                        label.Text = (S.SleepersNames and ("SLEEPER: " .. entry.Name) or "SLEEPER") .. (S.SleepersDistance and ("\n" .. math.floor(dist) .. "m") or "")
+                        label.Position = Vector2.new(x, y)
+                        label.Size = 13
+                        label.Color = Color3.fromRGB(180, 180, 255)
+                    end
+                    rendered += 1
+                end
+            end
+        end
+    end
+end
+
+function SleeperESP.Update()
+    sleeperScan()
+    renderSleeperESP()
+end
+
 -- ============================================================
 -- RENDER LOOP
 -- ============================================================
@@ -2263,11 +2342,11 @@ RunService.RenderStepped:Connect(function(dt)
     Aim.Update(dt)
     Aim.UpdateTrigger()
     ESP.Update()
+    SleeperESP.Update()
     World.Update()
     renderWorld()
     renderSilent()
     killCameraShake()
-    updateSpeedJump()
     updateScanner()
     updateAutoLoot()
     updateAutoTool()
@@ -2411,6 +2490,13 @@ NPCESPBox:CreateToggle({Name="Distance", CurrentValue=S.NPCDistance, Flag="NPCDi
 NPCESPBox:CreateToggle({Name="Health", CurrentValue=S.NPCHealth, Flag="NPCHealth", Callback=function(v) S.NPCHealth=v end})
 NPCESPBox:CreateSlider({Name="Range", Range={50,3000}, Increment=10, CurrentValue=S.NPCRange, Flag="NPCRange", Callback=function(v) S.NPCRange=v end})
 NPCESPBox:CreateSlider({Name="Text Size", Range={8,24}, Increment=1, CurrentValue=S.NPCTextSize, Flag="NPCTextSize", Callback=function(v) S.NPCTextSize=v end})
+
+-- Sleeper ESP
+local SleeperESPBox = VisualsTab:AddRightGroupbox({Name="Sleeper ESP", Icon="moon"})
+SleeperESPBox:CreateToggle({Name="Sleeper ESP", CurrentValue=S.SleepersESP, Flag="SleepersESP", Callback=function(v) S.SleepersESP=v end})
+SleeperESPBox:CreateToggle({Name="Names", CurrentValue=S.SleepersNames, Flag="SleepersNames", Callback=function(v) S.SleepersNames=v end})
+SleeperESPBox:CreateToggle({Name="Distance", CurrentValue=S.SleepersDistance, Flag="SleepersDistance", Callback=function(v) S.SleepersDistance=v end})
+SleeperESPBox:CreateSlider({Name="Range", Range={50,3000}, Increment=10, CurrentValue=S.SleepersRange, Flag="SleepersRange", Callback=function(v) S.SleepersRange=v end})
 
 -- WORLD
 local LootBox = WorldTab:AddLeftGroupbox({Name="Loot ESP", Icon="box"})
